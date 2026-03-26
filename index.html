@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tesla TCO · 2016 P90D vs 2023 Plaid</title>
+  <!-- React + ReactDOM from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel standalone: transpiles JSX in the browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500;600&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f0f0f; color: #e8e0d0; font-family: 'DM Sans', system-ui, sans-serif; }
+    input[type=range] { width: 100%; appearance: none; height: 3px; border-radius: 2px; outline: none; cursor: pointer; }
+    input[type=range]::-webkit-slider-thumb {
+      appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #c9a96e; cursor: pointer; box-shadow: 0 0 8px rgba(201,169,110,0.45);
+    }
+    input[type=range]::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%; border: none;
+      background: #c9a96e; cursor: pointer;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { font-family: inherit; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    const fmt = (n) =>
+      new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
+
+    const calcMonthly = (principal, annualRate, months) => {
+      const r = annualRate / 12 / 100;
+      if (r === 0) return principal / months;
+      return principal * (r * Math.pow(1 + r, months)) / (Math.pow(1 + r, months) - 1);
+    };
+
+    const Slider = ({ label, min, max, step, value, onChange, format, hint }) => {
+      const pct = ((value - min) / (max - min)) * 100;
+      return (
+        <div style={{ marginBottom: "20px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+            <span style={{ fontSize: "11px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#888" }}>{label}</span>
+            <span style={{ fontSize: "13px", fontFamily: "'DM Mono', monospace", color: "#e8e0d0", fontWeight: 600 }}>{format(value)}</span>
+          </div>
+          {hint && <div style={{ fontSize: "10px", color: "#555", marginBottom: "5px" }}>{hint}</div>}
+          <input
+            type="range" min={min} max={max} step={step} value={value}
+            onChange={(e) => onChange(Number(e.target.value))}
+            style={{ background: `linear-gradient(to right, #c9a96e ${pct}%, #2a2a2a ${pct}%)` }}
+          />
+        </div>
+      );
+    };
+
+    const SectionLabel = ({ children }) => (
+      <div style={{
+        fontSize: "10px", letterSpacing: "0.18em", color: "#c9a96e",
+        textTransform: "uppercase", marginBottom: "16px", paddingBottom: "8px",
+        borderBottom: "1px solid #222"
+      }}>{children}</div>
+    );
+
+    const Card = ({ children, style = {} }) => (
+      <div style={{ background: "#141414", border: "1px solid #1e1e1e", borderRadius: "12px", padding: "24px", ...style }}>
+        {children}
+      </div>
+    );
+
+    const CardLabel = ({ children }) => (
+      <div style={{ fontSize: "10px", letterSpacing: "0.15em", color: "#c9a96e", textTransform: "uppercase", marginBottom: "14px" }}>{children}</div>
+    );
+
+    function App() {
+      const [repairCost,     setRepairCost]     = useState(7500);
+      const [repairGrowth,   setRepairGrowth]   = useState(15);
+      const [p90dResidual,   setP90dResidual]   = useState(12000);
+      const [tradeIn,        setTradeIn]        = useState(30000);
+      const [purchasePrice,  setPurchasePrice]  = useState(85000);
+      const [rate,           setRate]           = useState(7.99);
+      const [term,           setTerm]           = useState(72);
+      const [insuranceDelta, setInsuranceDelta] = useState(600);
+      const [plaidResidual,  setPlaidResidual]  = useState(42000);
+
+      const a = useMemo(() => {
+        const financed = purchasePrice - tradeIn;
+        const monthly  = calcMonthly(financed, rate, term);
+        const totalInterest = monthly * term - financed;
+        let keepCum = 0, upgradeCum = 0;
+        const keepRows = [], upgradeRows = [];
+
+        for (let y = 1; y <= 5; y++) {
+          const repair = repairCost * Math.pow(1 + repairGrowth / 100, y - 1);
+          keepCum += repair;
+          const monthsThisYear = Math.min(12, Math.max(0, term - (y - 1) * 12));
+          const upgradeAnnual  = monthsThisYear * monthly + insuranceDelta;
+          upgradeCum += upgradeAnnual;
+          keepRows.push({ year: y, annual: repair, cumulative: keepCum });
+          upgradeRows.push({ year: y, annual: upgradeAnnual, cumulative: upgradeCum });
+        }
+
+        const keepNetTCO    = keepCum    - p90dResidual;
+        const upgradeNetTCO = upgradeCum - plaidResidual;
+        const winner  = upgradeNetTCO < keepNetTCO ? "upgrade" : "keep";
+        const tcoDelta = Math.abs(upgradeNetTCO - keepNetTCO);
+
+        return { financed, monthly, totalInterest, keepRows, upgradeRows,
+                 keepCum, upgradeCum, keepNetTCO, upgradeNetTCO, winner, tcoDelta };
+      }, [repairCost, repairGrowth, p90dResidual, tradeIn, purchasePrice, rate, term, insuranceDelta, plaidResidual]);
+
+      const winnerColor = a.winner === "upgrade" ? "#c9a96e" : "#6ec9a0";
+
+      return (
+        <div style={{ minHeight: "100vh", padding: "40px 20px" }}>
+          <div style={{ maxWidth: "960px", margin: "0 auto" }}>
+
+            {/* Header */}
+            <div style={{ marginBottom: "36px" }}>
+              <div style={{ fontSize: "11px", letterSpacing: "0.2em", color: "#c9a96e", textTransform: "uppercase", marginBottom: "8px" }}>
+                Total Cost of Ownership
+              </div>
+              <h1 style={{ fontFamily: "'Playfair Display', serif", fontSize: "clamp(26px, 5vw, 40px)", fontWeight: 700, lineHeight: 1.15 }}>
+                2016 P90D <span style={{ color: "#333" }}>vs</span> 2023 Plaid
+              </h1>
+              <p style={{ color: "#555", fontSize: "12px", marginTop: "6px", fontWeight: 300 }}>
+                5-year horizon · includes residual asset value
+              </p>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "20px", alignItems: "start" }}>
+
+              {/* ── Controls ── */}
+              <div style={{ background: "#141414", border: "1px solid #1e1e1e", borderRadius: "14px", padding: "28px" }}>
+                <SectionLabel>Keep P90D</SectionLabel>
+                <Slider label="Annual Repair Cost"    min={1000}  max={20000} step={500}  value={repairCost}    onChange={setRepairCost}    format={fmt}              hint="Your current spend: ~$7,500/yr" />
+                <Slider label="Repair Growth / yr"    min={0}     max={35}    step={1}    value={repairGrowth}  onChange={setRepairGrowth}  format={v => `${v}%`}     hint="How fast costs are escalating" />
+                <Slider label="P90D Residual @ Yr 5"  min={3000}  max={25000} step={500}  value={p90dResidual}  onChange={setP90dResidual}  format={fmt}              hint="Est. sale value in 2031 at ~230K km" />
+
+                <div style={{ margin: "24px 0", borderTop: "1px solid #1e1e1e" }} />
+                <SectionLabel>Upgrade to Plaid</SectionLabel>
+                <Slider label="Purchase Price"         min={75000} max={115000} step={1000} value={purchasePrice}  onChange={setPurchasePrice}  format={fmt} />
+                <Slider label="Trade-in Value (P90D)"  min={15000} max={45000}  step={1000} value={tradeIn}        onChange={setTradeIn}        format={fmt}         hint="Get offers from Clutch/AutoTrader first" />
+                <Slider label="Financing Rate"         min={4}     max={12}     step={0.25} value={rate}           onChange={setRate}           format={v => `${v}%`} />
+                <Slider label="Loan Term"              min={36}    max={84}     step={12}   value={term}           onChange={setTerm}           format={v => `${v} mo`} />
+                <Slider label="Insurance Increase / yr" min={0}   max={2500}   step={100}  value={insuranceDelta} onChange={setInsuranceDelta} format={fmt} />
+                <Slider label="Plaid Residual @ Yr 5"  min={20000} max={65000}  step={1000} value={plaidResidual}  onChange={setPlaidResidual}  format={fmt}         hint="Est. sale value in 2031 (~8yr old Plaid)" />
+              </div>
+
+              {/* ── Results ── */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+
+                {/* Verdict */}
+                <div style={{ background: "#141414", border: `1px solid ${winnerColor}`, borderRadius: "14px", padding: "28px" }}>
+                  <div style={{ fontSize: "10px", letterSpacing: "0.18em", color: "#555", textTransform: "uppercase", marginBottom: "6px" }}>TCO Verdict · 5 Years</div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "12px", flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "'Playfair Display', serif", fontSize: "26px", color: winnerColor }}>
+                      {a.winner === "upgrade" ? "Upgrade wins" : "Keep wins"}
+                    </span>
+                    <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "20px" }}>
+                      by {fmt(a.tcoDelta)}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: "12px", color: "#555", marginTop: "10px", lineHeight: 1.7 }}>
+                    Net cost of keeping the P90D:{" "}
+                    <span style={{ color: "#e8e0d0", fontFamily: "'DM Mono', monospace" }}>{fmt(a.keepNetTCO)}</span>
+                    {" "}· Upgrading:{" "}
+                    <span style={{ color: "#c9a96e", fontFamily: "'DM Mono', monospace" }}>{fmt(a.upgradeNetTCO)}</span>
+                  </p>
+                </div>
+
+                {/* Side-by-side snapshot */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+                  {[
+                    { label: "Keep P90D",       accent: "#6ec9a0", gross: a.keepCum,    asset: p90dResidual, net: a.keepNetTCO },
+                    { label: "Upgrade to Plaid", accent: "#c9a96e", gross: a.upgradeCum, asset: plaidResidual, net: a.upgradeNetTCO },
+                  ].map(({ label, accent, gross, asset, net }) => (
+                    <Card key={label}>
+                      <CardLabel>{label}</CardLabel>
+                      {[["5yr Gross Spend", fmt(gross)], ["Asset at Year 5", fmt(asset)], ["Net TCO", fmt(net)]].map(([k, v], i, arr) => (
+                        <div key={k} style={{
+                          display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                          padding: "7px 0",
+                          borderTop: i === arr.length - 1 ? "1px solid #222" : "none",
+                          marginTop: i === arr.length - 1 ? "4px" : 0,
+                        }}>
+                          <span style={{ fontSize: "11px", color: "#555" }}>{k}</span>
+                          <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "13px", color: i === arr.length - 1 ? accent : "#ccc", fontWeight: i === arr.length - 1 ? 600 : 400 }}>{v}</span>
+                        </div>
+                      ))}
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Financing detail */}
+                <Card>
+                  <CardLabel>Financing Detail</CardLabel>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px" }}>
+                    {[
+                      ["Financed",       fmt(a.financed)],
+                      ["Monthly",        fmt(a.monthly)],
+                      ["Total Interest", fmt(a.totalInterest)],
+                      ["Total Loan Cost",fmt(a.monthly * term)],
+                    ].map(([k, v]) => (
+                      <div key={k} style={{ background: "#0f0f0f", borderRadius: "8px", padding: "12px" }}>
+                        <div style={{ fontSize: "10px", color: "#555", marginBottom: "5px" }}>{k}</div>
+                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "13px" }}>{v}</div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+
+                {/* Year-by-year table */}
+                <Card>
+                  <CardLabel>Year-by-Year</CardLabel>
+                  <table style={{ fontSize: "12px" }}>
+                    <thead>
+                      <tr style={{ borderBottom: "1px solid #1e1e1e" }}>
+                        {["Year","Keep Spend","Keep Cumul.","Upgrade Spend","Upgrade Cumul.","Gross Δ"].map(h => (
+                          <th key={h} style={{ padding: "6px 10px", textAlign: h === "Year" ? "left" : "right", fontSize: "10px", letterSpacing: "0.08em", color: "#444", textTransform: "uppercase", fontWeight: 500 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {a.keepRows.map((row, i) => {
+                        const up   = a.upgradeRows[i];
+                        const diff = up.cumulative - row.cumulative;
+                        const isLast = i === a.keepRows.length - 1;
+                        return (
+                          <tr key={row.year} style={{ borderBottom: "1px solid #181818", background: isLast ? "#161410" : "transparent" }}>
+                            <td style={{ padding: "9px 10px", color: "#666" }}>Yr {row.year}</td>
+                            <td style={{ padding: "9px 10px", textAlign: "right", fontFamily: "'DM Mono', monospace", color: "#999" }}>{fmt(row.annual)}</td>
+                            <td style={{ padding: "9px 10px", textAlign: "right", fontFamily: "'DM Mono', monospace", color: "#ccc" }}>{fmt(row.cumulative)}</td>
+                            <td style={{ padding: "9px 10px", textAlign: "right", fontFamily: "'DM Mono', monospace", color: "#999" }}>{fmt(up.annual)}</td>
+                            <td style={{ padding: "9px 10px", textAlign: "right", fontFamily: "'DM Mono', monospace", color: "#c9a96e" }}>{fmt(up.cumulative)}</td>
+                            <td style={{ padding: "9px 10px", textAlign: "right", fontFamily: "'DM Mono', monospace", fontSize: "11px", color: diff < 0 ? "#6ec9a0" : "#c96e6e" }}>
+                              {diff < 0 ? "▼ " : "▲ "}{fmt(Math.abs(diff))}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{ borderTop: "1px solid #333", background: "#111" }}>
+                        <td style={{ padding: "10px", color: "#888", fontSize: "11px", letterSpacing: "0.08em" }}>NET TCO</td>
+                        <td colSpan={2} style={{ padding: "10px", textAlign: "right", fontFamily: "'DM Mono', monospace", color: "#6ec9a0", fontWeight: 600 }}>
+                          {fmt(a.keepNetTCO)}{" "}
+                          <span style={{ color: "#444", fontSize: "10px" }}>after {fmt(p90dResidual)} residual</span>
+                        </td>
+                        <td colSpan={2} style={{ padding: "10px", textAlign: "right", fontFamily: "'DM Mono', monospace", color: "#c9a96e", fontWeight: 600 }}>
+                          {fmt(a.upgradeNetTCO)}{" "}
+                          <span style={{ color: "#444", fontSize: "10px" }}>after {fmt(plaidResidual)} residual</span>
+                        </td>
+                        <td style={{ padding: "10px", textAlign: "right", fontFamily: "'DM Mono', monospace", fontSize: "12px", color: winnerColor, fontWeight: 600 }}>
+                          {fmt(a.tcoDelta)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <p style={{ fontSize: "10px", color: "#383838", marginTop: "14px", lineHeight: 1.7 }}>
+                    Gross Δ: ▼ upgrade cheaper · ▲ keep cheaper · Net TCO = 5yr gross spend minus estimated residual value · Repair growth compounds annually
+                  </p>
+                </Card>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
